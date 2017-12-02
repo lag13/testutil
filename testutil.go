@@ -9,6 +9,17 @@ import (
 	"strings"
 )
 
+// CheckErrHasMsg checks that the received error contains the message
+// we want.
+func CheckErrHasMsg(err error, wantMsg string) string {
+	if wantMsg == "" && err != nil {
+		return fmt.Sprintf("got non-nil error: %v", err)
+	} else if got, want := fmt.Sprintf("%v", err), wantMsg; wantMsg != "" && !strings.HasPrefix(got, want) {
+		return fmt.Sprintf("got error message:\n  %s\nwant error message to start with the string:\n  %s", got, want)
+	}
+	return ""
+}
+
 // MustNewHTTPRequest creates a new HTTP request suitable for sending
 // as opposed to httptest.NewRequest which is only suitable for
 // passing into a http.Handler. It panic's if the request cannot be
@@ -42,8 +53,8 @@ func MustReadAll(r io.Reader) string {
 }
 
 // CompareStrings compares two strings and returns a string detailing
-// where they differ. Useful for when two large strings need to be
-// compared.
+// where they differ or "" if they don't. Useful for when two large
+// strings need to be compared.
 func CompareStrings(got string, want string) string {
 	return ""
 }
