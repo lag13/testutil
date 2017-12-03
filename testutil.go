@@ -56,21 +56,33 @@ func MustReadAll(r io.Reader) string {
 // where they differ or "" if they don't. Useful for when two large
 // strings need to be compared.
 func CompareStrings(got string, want string) string {
+	for i := range want {
+		if i > len(got)-1 {
+			return fmt.Sprintf("got a shorter string than what we wanted (characters match otherwise) and the missing characters are: %s", want[i:])
+		}
+		if got[i] != want[i] {
+			return fmt.Sprintf("strings differ at index %d, from that index on:\n##### got string #####\n%s\n##### want string #####\n%s", i, got[i:], want[i:])
+		}
+	}
+	if len(want) < len(got) {
+		return fmt.Sprintf("got a longer string than what we wanted (characters match otherwise) and the extra characters are: %s", got[len(want):])
+	}
 	return ""
 }
 
 // HTTPRequest represents the fields of a HTTP request which I think
-// are most important for comparing. It also can be marshalled to JSON
-// with the intent that you can use it to check that your API sent the
-// expected requests to another API in an end-to-end test. In practice
-// that should look something like:
+// are most important for checking in a unit test. It also can be
+// marshalled to JSON the intent being that you can use it to check if
+// your API sent the expected requests to another API in an end-to-end
+// test. In practice that would look something like:
 //
 // 	- In test code trigger an endpoint on your API which talks to
 // 	  a mock API XYZ.
 //      - When XYZ receives the request it will record it.
-//      - After your API is done the test code will hit an endpoint on
-//        XYZ to return the requests it received. Then your test code
-//        checks to make sure that the expected requests were sent.
+//      - After your API is done the test code will call an endpoint
+//        on XYZ to return the requests it received. Then your test
+//        code checks to make sure that the expected requests were
+//        sent.
 type HTTPRequest struct {
 	Header http.Header `json:"header"`
 	Method string      `json:"method"`
@@ -99,22 +111,20 @@ func CompareHTTPRequests(got HTTPRequest, want HTTPRequest) string {
 	diffs := []string{}
 	for headerName := range want.Header {
 		if got, want := got.Header.Get(headerName), want.Header.Get(headerName); got != want {
-			diffs = append(diffs, fmt.Sprintf("for header %q got value %q, want %q", headerName, got, want))
+			diffs = append(diffs, fmt.Sprintf("header %q got value %q, want %q", headerName, got, want))
 		}
 	}
 	if got, want := got.Method, want.Method; got != want {
 		diffs = append(diffs, fmt.Sprintf("got method %q, want %q", got, want))
 	}
-	// TODO: Maybe use compare string function here?
 	if got, want := got.URL, want.URL; got != want {
 		diffs = append(diffs, fmt.Sprintf("got url:\n  %q\nwant:\n  %q", got, want))
 	}
-	// TODO: Use compare string function here.
-	if got, want := got.Body, want.Body; got != want {
-		diffs = append(diffs, fmt.Sprintf("got body:\n  %s\nwant:\n  %s", got, want))
+	if diff := CompareStrings(got.Body, want.Body); diff != "" {
+		diffs = append(diffs, "body is not expected, "+diff)
 	}
 	if len(diffs) > 0 {
-		return "request is not expected:\n" + strings.Join(diffs, "\n")
+		return "request does not match what is expected:\n" + strings.Join(diffs, "\n")
 	}
 	return ""
 }
