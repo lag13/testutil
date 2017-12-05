@@ -84,30 +84,15 @@ func CompareStrings(got string, want string) string {
 //        code checks to make sure that the expected requests were
 //        sent.
 type HTTPRequest struct {
-	Header http.Header `json:"header"`
 	Method string      `json:"method"`
 	URL    string      `json:"url"`
+	Header http.Header `json:"header"`
 	Body   string      `json:"body"`
 }
 
-// HTTPReqToTestutilHTTPReq converts an *http.Request to a
-// HTTPRequest. It exists because I started writing a comparison
-// function for http.Request's and HTTPRequest's and thought that was
-// silly since they were so similar.
-func HTTPReqToTestutilHTTPReq(req *http.Request) HTTPRequest {
-	return HTTPRequest{
-		Header: req.Header,
-		Method: req.Method,
-		URL:    req.URL.String(),
-		Body:   MustReadAll(req.Body),
-	}
-}
-
-// CompareHTTPRequests checks two HTTPRequest types for equality (the
-// exception being the HTTP Header where we just check that we
-// produced the specific headers we're interested in and ignore any
-// extras).
-func CompareHTTPRequests(got HTTPRequest, want HTTPRequest) string {
+// CheckHTTPRequest checks to make sure that a http.Request has the
+// fields we're looking for.
+func CheckHTTPRequest(got *http.Request, want HTTPRequest) string {
 	diffs := []string{}
 	for headerName := range want.Header {
 		if got, want := got.Header.Get(headerName), want.Header.Get(headerName); got != want {
@@ -117,14 +102,50 @@ func CompareHTTPRequests(got HTTPRequest, want HTTPRequest) string {
 	if got, want := got.Method, want.Method; got != want {
 		diffs = append(diffs, fmt.Sprintf("got method %q, want %q", got, want))
 	}
-	if got, want := got.URL, want.URL; got != want {
+	if got, want := got.URL.String(), want.URL; got != want {
 		diffs = append(diffs, fmt.Sprintf("got url:\n  %q\nwant:\n  %q", got, want))
 	}
-	if diff := CompareStrings(got.Body, want.Body); diff != "" {
+	if diff := CompareStrings(MustReadAll(got.Body), want.Body); diff != "" {
 		diffs = append(diffs, "body is not expected, "+diff)
 	}
 	if len(diffs) > 0 {
 		return "request does not match what is expected:\n" + strings.Join(diffs, "\n")
+	}
+	return ""
+}
+
+// HTTPResponse contains the fields on a http.Response we are
+// interested in checking.
+type HTTPResponse struct {
+	StatusCode int
+	Header     http.Header
+	Body       string
+}
+
+// CheckHTTPResponse compares two *http.Responses for equailty. It
+// only checks fields which I feel actually matter namely:
+//
+// 	- Status code
+// 	- Header
+// 	- Body
+//
+// It will probably get used in end-to-end tests to make sure that a
+// response received from an API is expected.
+func CheckHTTPResponse(gotResp *http.Response, wantResp HTTPResponse) string {
+	diffs := []string{}
+	if got, want := gotResp.StatusCode, wantResp.StatusCode; got != want {
+		diffs = append(diffs, fmt.Sprintf("got status code %d, want %d", got, want))
+	}
+	for headerName := range wantResp.Header {
+		if got, want := gotResp.Header.Get(headerName), wantResp.Header.Get(headerName); got != want {
+			diffs = append(diffs, fmt.Sprintf("header %q got value %q, want %q", headerName, got, want))
+		}
+	}
+	if diff := CompareStrings(MustReadAll(gotResp.Body), wantResp.Body); diff != "" {
+		diffs = append(diffs, "body is not expected, "+diff)
+	}
+	if len(diffs) > 0 {
+		return "response does not match what is expected:\n" + strings.Join(diffs, "\n")
 	}
 	return ""
 }

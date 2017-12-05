@@ -2,7 +2,9 @@ package testutil_test
 
 import (
 	"errors"
+	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -53,28 +55,6 @@ func TestCheckErrHasMsg(t *testing.T) {
 	}
 }
 
-// TestMustNewHTTPRequestAndFriends tests that the request gets
-// created as expected and uses some other helper functions along the
-// way!
-func TestMustNewHTTPRequestAndFriends(t *testing.T) {
-	wantReq := testutil.HTTPRequest{
-		Header: http.Header{
-			"Header1": {"hey there"},
-			"Header2": {"pretty momma"},
-		},
-		Method: "GET-OUTTA-HERE",
-		URL:    "http://hello.com/woweee?hello=world",
-		Body:   "hello",
-	}
-	req := testutil.MustNewHTTPRequest(wantReq.Method, wantReq.URL, strings.NewReader(wantReq.Body))
-	req.Header.Add("Header1", "hey there")
-	req.Header.Add("Header2", "pretty momma")
-	req.Header.Add("Extra", "an extra header")
-	if diff := testutil.CompareHTTPRequests(testutil.HTTPReqToTestutilHTTPReq(req), wantReq); diff != "" {
-		t.Error(diff)
-	}
-}
-
 // TestCompareStrings tests that the expected diff is generated in
 // different scenarios.
 func TestCompareStrings(t *testing.T) {
@@ -85,10 +65,14 @@ func TestCompareStrings(t *testing.T) {
 		wantDiff string
 	}{
 		{
-			name:     "strings differ at a character",
-			gotStr:   "hello there",
-			wantStr:  "hello theer buddy",
-			wantDiff: "strings differ at index 9, from that index on:\n##### got string #####\nre\n##### want string #####\ner buddy",
+			name:    "strings differ at a character",
+			gotStr:  "hello there",
+			wantStr: "hello theer buddy",
+			wantDiff: `strings differ at index 9, from that index on:
+##### got string #####
+re
+##### want string #####
+er buddy`,
 		},
 		{
 			name:     "got string is longer but matches otherwise",
@@ -137,27 +121,38 @@ func TestCompareStrings(t *testing.T) {
 	}
 }
 
-// TestCompareHTTPRequest tests that the expected diff is generated
-// when comparing HTTP requests.
-func TestCompareHTTPRequest(t *testing.T) {
-	gotReq := testutil.HTTPRequest{
-		Header: http.Header{
-			"Header1": {"some value"},
-			"Header2": {"some other value"},
-		},
-		Method: "DELETE",
-		URL:    "http://hello.com",
-		Body:   "hello buddy!",
-	}
-	wantReq := testutil.HTTPRequest{
-		Header: http.Header{
-			"Header1": {"a different value"},
-		},
-		Method: "POST",
-		URL:    "http://hello-there.com",
-		Body:   "goodbye buddy!",
-	}
-	wantDiff := `request does not match what is expected:
+// TestCheckHTTPRequest tests that the expected diff is generated when
+// comparing HTTP requests.
+func TestCheckHTTPRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		gotReq   *http.Request
+		wantReq  testutil.HTTPRequest
+		wantDiff string
+	}{
+		{
+			name: "requests not equal",
+			gotReq: &http.Request{
+				Method: "DELETE",
+				URL: &url.URL{
+					Scheme: "http",
+					Host:   "hello.com",
+				},
+				Header: http.Header{
+					"Header1": {"some value"},
+					"Header2": {"some other value"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader("hello buddy!")),
+			},
+			wantReq: testutil.HTTPRequest{
+				Method: "POST",
+				URL:    "http://hello-there.com",
+				Header: http.Header{
+					"Header1": {"a different value"},
+				},
+				Body: "goodbye buddy!",
+			},
+			wantDiff: `request does not match what is expected:
 header "Header1" got value "some value", want "a different value"
 got method "DELETE", want "POST"
 got url:
@@ -168,8 +163,98 @@ body is not expected, strings differ at index 0, from that index on:
 ##### got string #####
 hello buddy!
 ##### want string #####
-goodbye buddy!`
-	if diff := testutil.CompareStrings(testutil.CompareHTTPRequests(gotReq, wantReq), wantDiff); diff != "" {
-		t.Error(diff)
+goodbye buddy!`,
+		},
+		{
+			name: "requests equal",
+			gotReq: &http.Request{
+				Method: "POST",
+				URL: &url.URL{
+					Scheme: "http",
+					Host:   "hello.com",
+				},
+				Header: http.Header{
+					"Header1": {"a different value"},
+					"Header2": {"some value"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader("hello buddy!")),
+			},
+			wantReq: testutil.HTTPRequest{
+				Method: "POST",
+				URL:    "http://hello.com",
+				Header: http.Header{
+					"Header1": {"a different value"},
+				},
+				Body: "hello buddy!",
+			},
+			wantDiff: "",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if diff := testutil.CompareStrings(testutil.CheckHTTPRequest(test.gotReq, test.wantReq), test.wantDiff); diff != "" {
+				t.Error("did not get expected diff\n" + diff)
+			}
+		})
+	}
+}
+
+// TestCheckHTTPResponse tests that the expected diff is generated
+// when comparing HTTP requests.
+func TestCheckHTTPResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		gotResp  *http.Response
+		wantResp testutil.HTTPResponse
+		wantDiff string
+	}{
+		{
+			name: "responses not equal",
+			gotResp: &http.Response{
+				StatusCode: 101,
+				Header: http.Header{
+					"Header1": {"some value"},
+					"Header2": {"some other value"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader("hello buddy!")),
+			},
+			wantResp: testutil.HTTPResponse{
+				StatusCode: 200,
+				Header:     http.Header{"Header1": {"a different value"}},
+				Body:       "hello buddy-ol-pal!",
+			},
+			wantDiff: `response does not match what is expected:
+got status code 101, want 200
+header "Header1" got value "some value", want "a different value"
+body is not expected, strings differ at index 11, from that index on:
+##### got string #####
+!
+##### want string #####
+-ol-pal!`,
+		},
+		{
+			name: "responses equal",
+			gotResp: &http.Response{
+				StatusCode: 200,
+				Header: http.Header{
+					"Header1": {"a different value"},
+					"Header2": {"some other value"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader("hello buddy-ol-pal!")),
+			},
+			wantResp: testutil.HTTPResponse{
+				StatusCode: 200,
+				Header:     http.Header{"Header1": {"a different value"}},
+				Body:       "hello buddy-ol-pal!",
+			},
+			wantDiff: "",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if diff := testutil.CompareStrings(testutil.CheckHTTPResponse(test.gotResp, test.wantResp), test.wantDiff); diff != "" {
+				t.Error(diff)
+			}
+		})
 	}
 }
